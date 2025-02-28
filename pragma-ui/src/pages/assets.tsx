@@ -8,8 +8,9 @@ import moment from "moment";
 import { COINGECKO_MAPPING_IDS } from "../utils/types";
 import { getPublisherType } from "../utils";
 import AssetHero from "../components/common/AssetHero";
+import { useRouter } from "next/router";
 
-export const options = ["sepolia", "mainnet"];
+export const options = ["sepolia", "mainnet", "api"];
 
 export type AssetInfo = {
   image: string;
@@ -41,30 +42,48 @@ export type DataProviderInfo = {
 };
 
 const formatAssets = (data: { [ticker: string]: any }): AssetInfo[] => {
-  return Object.keys(data).map((ticker) => {
-    const assetData = data[ticker];
-    const lastUpdated = moment(
-      assetData.last_updated_timestamp * 1000
-    ).fromNow(); // Using moment.js to format time
-    return {
-      image: `/assets/currencies/${ticker.toLowerCase().split("/")[0]}.svg`,
-      type: "Crypto",
-      ticker,
-      lastUpdated: lastUpdated,
-      price: parseInt(assetData.price, 16) / 10 ** assetData.decimals,
-      sources: assetData.nb_sources_aggregated,
-      variations: {
-        past1h: (assetData.variations["1h"] * 100).toFixed(2) || 0,
-        past24h: (assetData.variations["1d"] * 100).toFixed(2) || 0,
-        past7d: (assetData.variations["1w"] * 100).toFixed(2) || 0,
-      },
-      chart: `https://www.coingecko.com/coins/${
-        COINGECKO_MAPPING_IDS[ticker.toLowerCase().split("/")[0]]
-      }/sparkline.svg`,
-      ema: "soon",
-      macd: "soon",
-    };
-  });
+  return Object.keys(data)
+    .filter((ticker) => data[ticker]) // Filter out undefined/null entries
+    .map((ticker) => {
+      const assetData = data[ticker];
+      const timestamp = assetData.last_updated_timestamp * 1000;
+      const now = Date.now();
+      const diffMs = now - timestamp;
+      
+      let lastUpdated;
+      if (diffMs < 10000) { // Less than 10 seconds, show ms
+        lastUpdated = `${diffMs}ms ago`;
+      } else if (diffMs < 60000) { // Less than 1 minute
+        const seconds = Math.floor(diffMs / 1000);
+        const ms = diffMs % 1000;
+        lastUpdated = `${seconds}.${ms.toString().padStart(3, '0')}s ago`;
+      } else if (diffMs < 3600000) { // Less than 1 hour
+        const minutes = Math.floor(diffMs / 60000);
+        const seconds = Math.floor((diffMs % 60000) / 1000);
+        lastUpdated = `${minutes}m ${seconds}s ago`;
+      } else {
+        lastUpdated = moment(timestamp).format('HH:mm:ss.SSS');
+      }
+
+      return {
+        image: `/assets/currencies/${ticker.toLowerCase().split("/")[0]}.svg`,
+        type: "Crypto",
+        ticker,
+        lastUpdated,
+        price: parseInt(assetData.price, 16) / 10 ** assetData.decimals,
+        sources: assetData.nb_sources_aggregated,
+        variations: {
+          past1h: (assetData.variations["1h"] * 100).toFixed(2) || 0,
+          past24h: (assetData.variations["1d"] * 100).toFixed(2) || 0,
+          past7d: (assetData.variations["1w"] * 100).toFixed(2) || 0,
+        },
+        chart: `https://www.coingecko.com/coins/${
+          COINGECKO_MAPPING_IDS[ticker.toLowerCase().split("/")[0]]
+        }/sparkline.svg`,
+        ema: "soon",
+        macd: "soon",
+      };
+    });
 };
 
 const formatPublishers = (publishers: PublisherT[]): DataProviderInfo[] => {
@@ -88,6 +107,25 @@ const formatPublishers = (publishers: PublisherT[]): DataProviderInfo[] => {
 
 const AssetsPage = () => {
   const { data, loading, switchSource, currentSource, publishers } = useData();
+  const router = useRouter();
+  const sourceParam = router.query.source as string;
+
+  // If there's a source parameter and it's valid, switch to it on mount
+  React.useEffect(() => {
+    if (
+      sourceParam &&
+      options.includes(sourceParam) &&
+      sourceParam !== currentSource
+    ) {
+      switchSource(sourceParam);
+    }
+  }, [sourceParam, currentSource, switchSource]);
+
+  const handleSourceChange = (newSource: string) => {
+    router.push(`/assets?source=${newSource}`, undefined, { shallow: true });
+    switchSource(newSource);
+  };
+
   const formattedAssets = loading ? [] : formatAssets(data);
   const formattedPublishers = loading ? [] : formatPublishers(publishers);
   return (
@@ -113,21 +151,23 @@ const AssetsPage = () => {
           options={options}
           isAsset={true}
           assets={formattedAssets}
-          onSourceChange={switchSource}
+          onSourceChange={handleSourceChange}
           selectedSource={currentSource}
           loading={loading}
         />
       </BoxContainer>
-      <BoxContainer>
-        <AssetList
-          options={options}
-          isAsset={false}
-          assets={formattedPublishers}
-          onSourceChange={switchSource}
-          selectedSource={currentSource}
-          loading={loading}
-        />
-      </BoxContainer>
+      {currentSource !== "api" && (
+        <BoxContainer>
+          <AssetList
+            options={options}
+            isAsset={false}
+            assets={formattedPublishers}
+            onSourceChange={handleSourceChange}
+            selectedSource={currentSource}
+            loading={loading}
+          />
+        </BoxContainer>
+      )}
     </div>
   );
 };
